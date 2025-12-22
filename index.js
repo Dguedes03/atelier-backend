@@ -82,7 +82,8 @@ app.post("/auth/login", async (req, res) => {
 app.post("/auth/recover", async (req, res) => {
   const { email } = req.body;
 
-  const { error } = await supabase.auth.resetPasswordForEmail(email);
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+  redirectTo: "https://dguedes03.github.io/Persona/"});
 
   if (error) {
     return res.status(400).json({ error: error.message });
