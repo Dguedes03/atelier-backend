@@ -11,7 +11,7 @@ const app = express();
 const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 
 // ==========================
-// MIDDLEWARES GERAIS
+// MIDDLEWARES
 // ==========================
 app.use(cors());
 app.use(express.json());
@@ -83,7 +83,8 @@ app.post("/auth/recover", async (req, res) => {
   const { email } = req.body;
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-  redirectTo: "https://dguedes03.github.io/Persona/"});
+    redirectTo: "https://dguedes03.github.io/Persona/"
+  });
 
   if (error) {
     return res.status(400).json({ error: error.message });
@@ -93,7 +94,7 @@ app.post("/auth/recover", async (req, res) => {
 });
 
 // ==========================
-// PHOTOS (PUBLIC READ)
+// PHOTOS (PUBLIC)
 // ==========================
 app.get("/photos", async (_, res) => {
   const { data } = await supabase.from("photos").select("*");
@@ -101,7 +102,7 @@ app.get("/photos", async (_, res) => {
 });
 
 // ==========================
-// PHOTOS (ADMIN UPLOAD)
+// PHOTOS (ADMIN)
 // ==========================
 app.post(
   "/photos",
@@ -126,7 +127,7 @@ app.post(
 );
 
 // ==========================
-// STATS (PUBLICO)
+// STATS (PUBLIC)
 // ==========================
 app.post("/stats/visit", async (_, res) => {
   await supabase.rpc("increment_visitas");
@@ -144,7 +145,7 @@ app.post("/stats/click-orcamento", async (_, res) => {
 });
 
 // ==========================
-// ADMIN (PROTEGIDO)
+// ADMIN
 // ==========================
 app.get("/admin/stats", auth, adminOnly, async (_, res) => {
   const { data } = await supabase
@@ -165,7 +166,27 @@ app.get("/admin/clients", auth, adminOnly, async (_, res) => {
 });
 
 // ==========================
-// START SERVER (SEMPRE POR ÚLTIMO)
+// ME (QUEM ESTÁ LOGADO)
+// ==========================
+app.get("/me", auth, async (req, res) => {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", req.user.id)
+    .single();
+
+  if (error) {
+    return res.status(500).json({ error: "Erro ao buscar perfil" });
+  }
+
+  res.json({
+    id: req.user.id,
+    role: data.role
+  });
+});
+
+// ==========================
+// START SERVER
 // ==========================
 app.listen(process.env.PORT || 3000, () => {
   console.log("🚀 Server running");
