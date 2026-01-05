@@ -83,7 +83,7 @@ app.post("/auth/recover", async (req, res) => {
   const { email } = req.body;
 
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: "https://dguedes03.github.io/Persona/"
+    redirectTo: "https://dguedes03.github.io/Persona/reset.html"
   });
 
   if (error) {
