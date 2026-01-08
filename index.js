@@ -51,12 +51,20 @@ app.post("/auth/register", async (req, res) => {
     return res.status(400).json({ error: error.message });
   }
 
-  await supabase.from("profiles").insert({
+ const { error: profileError } = await supabase
+  .from("profiles")
+  .insert({
     id: data.user.id,
     role: "cliente",
     cpf,
     telefone
   });
+
+if (profileError) {
+  console.error("PROFILE INSERT ERROR:", profileError);
+  return res.status(400).json({ error: profileError.message });
+}
+
 
   res.status(201).json({ ok: true });
 });
