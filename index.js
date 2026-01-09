@@ -181,10 +181,19 @@ app.get("/me", auth, async (req, res) => {
     .from("profiles")
     .select("role")
     .eq("id", req.user.id)
-    .single();
+    .maybeSingle(); // 👈 AQUI está a correção
 
-  if (error) {
-    return res.status(500).json({ error: "Erro ao buscar perfil" });
+  // Se não existir profile, cria automaticamente
+  if (!data) {
+    await supabase.from("profiles").insert({
+      id: req.user.id,
+      role: "cliente"
+    });
+
+    return res.json({
+      id: req.user.id,
+      role: "cliente"
+    });
   }
 
   res.json({
