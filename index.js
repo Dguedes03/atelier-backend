@@ -51,20 +51,16 @@ app.post("/auth/register", async (req, res) => {
     return res.status(400).json({ error: error.message });
   }
 
- const { error: profileError } = await supabase
-  .from("profiles")
-  .insert({
+  const { error: profileError } = await supabase.from("profiles").insert({
     id: data.user.id,
     role: "cliente",
     cpf,
     telefone
   });
 
-if (profileError) {
-  console.error("PROFILE INSERT ERROR:", profileError);
-  return res.status(400).json({ error: profileError.message });
-}
-
+  if (profileError) {
+    return res.status(400).json({ error: profileError.message });
+  }
 
   res.status(201).json({ ok: true });
 });
@@ -110,7 +106,7 @@ app.get("/photos", async (_, res) => {
 });
 
 // ==========================
-// PHOTOS (ADMIN)
+// PHOTOS (ADMIN - UPLOAD)
 // ==========================
 app.post(
   "/photos",
@@ -128,11 +124,57 @@ app.post(
 
     const { data } = supabase.storage.from("photos").getPublicUrl(name);
 
-    await supabase.from("photos").insert({ url: data.publicUrl });
+    await supabase.from("photos").insert({
+      url: data.publicUrl,
+      description: null
+    });
 
     res.status(201).json({ url: data.publicUrl });
   }
 );
+
+// ==========================
+// PHOTOS (ADMIN - DELETE)
+// ==========================
+app.delete("/photos/:id", auth, adminOnly, async (req, res) => {
+  const { id } = req.params;
+
+  const { data, error } = await supabase
+    .from("photos")
+    .select("url")
+    .eq("id", id)
+    .single();
+
+  if (error || !data) {
+    return res.status(404).json({ error: "Foto não encontrada" });
+  }
+
+  const fileName = data.url.split("/").pop();
+
+  await supabase.storage.from("photos").remove([fileName]);
+  await supabase.from("photos").delete().eq("id", id);
+
+  res.json({ ok: true });
+});
+
+// ==========================
+// PHOTOS (ADMIN - UPDATE DESCRIPTION)
+// ==========================
+app.put("/photos/:id", auth, adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const { description } = req.body;
+
+  const { error } = await supabase
+    .from("photos")
+    .update({ description })
+    .eq("id", id);
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json({ ok: true });
+});
 
 // ==========================
 // STATS (PUBLIC)
@@ -174,16 +216,15 @@ app.get("/admin/clients", auth, adminOnly, async (_, res) => {
 });
 
 // ==========================
-// ME (QUEM ESTÁ LOGADO)
+// ME
 // ==========================
 app.get("/me", auth, async (req, res) => {
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", req.user.id)
-    .maybeSingle(); // 👈 AQUI está a correção
+    .maybeSingle();
 
-  // Se não existir profile, cria automaticamente
   if (!data) {
     await supabase.from("profiles").insert({
       id: req.user.id,
