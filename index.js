@@ -111,7 +111,7 @@ app.get("/photos", async (_, res) => {
 });
 
 // ==========================
-// PHOTOS (ADMIN - UPLOAD)
+// PHOTOS (ADMIN - UPLOAD COM TÍTULO + DESCRIÇÃO)
 // ==========================
 app.post(
   "/photos",
@@ -119,8 +119,16 @@ app.post(
   adminOnly,
   upload.single("file"),
   async (req, res) => {
+    const { title, description } = req.body;
+
     if (!req.file) {
       return res.status(400).json({ error: "Arquivo não enviado" });
+    }
+
+    if (!title || !description) {
+      return res
+        .status(400)
+        .json({ error: "Título e descrição são obrigatórios" });
     }
 
     const fileName = `${Date.now()}-${req.file.originalname}`;
@@ -139,14 +147,15 @@ app.post(
 
     const { error: insertError } = await supabase.from("photos").insert({
       url: data.publicUrl,
-      description: ""
+      title,
+      description
     });
 
     if (insertError) {
       return res.status(500).json({ error: insertError.message });
     }
 
-    res.status(201).json({ url: data.publicUrl });
+    res.status(201).json({ ok: true });
   }
 );
 
@@ -170,29 +179,6 @@ app.delete("/photos/:id", auth, adminOnly, async (req, res) => {
 
   await supabase.storage.from("photos").remove([fileName]);
   await supabase.from("photos").delete().eq("id", id);
-
-  res.json({ ok: true });
-});
-
-// ==========================
-// PHOTOS (ADMIN - UPDATE DESCRIPTION)
-// ==========================
-app.put("/photos/:id", auth, adminOnly, async (req, res) => {
-  const { id } = req.params;
-  const { description } = req.body;
-
-  if (typeof description !== "string") {
-    return res.status(400).json({ error: "Descrição inválida" });
-  }
-
-  const { error } = await supabase
-    .from("photos")
-    .update({ description })
-    .eq("id", id);
-
-  if (error) {
-    return res.status(500).json({ error: error.message });
-  }
 
   res.json({ ok: true });
 });
