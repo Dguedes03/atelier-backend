@@ -101,7 +101,12 @@ app.post("/auth/recover", async (req, res) => {
 // PHOTOS (PUBLIC)
 // ==========================
 app.get("/photos", async (_, res) => {
-  const { data } = await supabase.from("photos").select("*");
+  const { data, error } = await supabase.from("photos").select("*");
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
   res.json(data);
 });
 
@@ -118,16 +123,28 @@ app.post(
       return res.status(400).json({ error: "Arquivo não enviado" });
     }
 
-    const name = `${Date.now()}-${req.file.originalname}`;
+    const fileName = `${Date.now()}-${req.file.originalname}`;
 
-    await supabase.storage.from("photos").upload(name, req.file.buffer);
+    const { error: uploadError } = await supabase.storage
+      .from("photos")
+      .upload(fileName, req.file.buffer);
 
-    const { data } = supabase.storage.from("photos").getPublicUrl(name);
+    if (uploadError) {
+      return res.status(500).json({ error: uploadError.message });
+    }
 
-    await supabase.from("photos").insert({
+    const { data } = supabase.storage
+      .from("photos")
+      .getPublicUrl(fileName);
+
+    const { error: insertError } = await supabase.from("photos").insert({
       url: data.publicUrl,
-      description: null
+      description: ""
     });
+
+    if (insertError) {
+      return res.status(500).json({ error: insertError.message });
+    }
 
     res.status(201).json({ url: data.publicUrl });
   }
@@ -163,6 +180,10 @@ app.delete("/photos/:id", auth, adminOnly, async (req, res) => {
 app.put("/photos/:id", auth, adminOnly, async (req, res) => {
   const { id } = req.params;
   const { description } = req.body;
+
+  if (typeof description !== "string") {
+    return res.status(400).json({ error: "Descrição inválida" });
+  }
 
   const { error } = await supabase
     .from("photos")
