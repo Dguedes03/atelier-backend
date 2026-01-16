@@ -8,7 +8,13 @@ import { auth, adminOnly } from "./middlewares/auth.js";
 dotenv.config();
 
 const app = express();
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
+
+// ==========================
+// MULTER (UPLOAD MÚLTIPLO)
+// ==========================
+const upload = multer({
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
 
 // ==========================
 // MIDDLEWARES
@@ -98,10 +104,21 @@ app.post("/auth/recover", async (req, res) => {
 });
 
 // ==========================
-// PHOTOS (PUBLIC)
+// PRODUCTS (PUBLIC)
 // ==========================
-app.get("/photos", async (_, res) => {
-  const { data, error } = await supabase.from("photos").select("*");
+app.get("/products", async (_, res) => {
+  const { data, error } = await supabase
+    .from("products")
+    .select(`
+      id,
+      title,
+      description,
+      product_images (
+        id,
+        url
+      )
+    `)
+    .order("created_at", { ascending: false });
 
   if (error) {
     return res.status(500).json({ error: error.message });
@@ -111,80 +128,108 @@ app.get("/photos", async (_, res) => {
 });
 
 // ==========================
-// PHOTOS (ADMIN - UPLOAD COM TÍTULO + DESCRIÇÃO)
+// PRODUCTS (ADMIN - CREATE)
 // ==========================
 app.post(
-  "/photos",
+  "/products",
   auth,
   adminOnly,
-  upload.single("file"),
+  upload.array("files", 10),
   async (req, res) => {
-    const { title, description } = req.body;
+    try {
+      const { title, description } = req.body;
 
-    if (!req.file) {
-      return res.status(400).json({ error: "Arquivo não enviado" });
+      if (!title || !description) {
+        return res
+          .status(400)
+          .json({ error: "Título e descrição são obrigatórios" });
+      }
+
+      if (!req.files || !req.files.length) {
+        return res
+          .status(400)
+          .json({ error: "Envie ao menos uma imagem" });
+      }
+
+      // 1️⃣ cria produto
+      const { data: product, error: productError } = await supabase
+        .from("products")
+        .insert({ title, description })
+        .select()
+        .single();
+
+      if (productError) {
+        return res.status(500).json({ error: productError.message });
+      }
+
+      // 2️⃣ upload imagens
+      const images = [];
+
+      for (const file of req.files) {
+        const fileName = `${Date.now()}-${file.originalname}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("photos")
+          .upload(fileName, file.buffer, {
+            contentType: file.mimetype
+          });
+
+        if (uploadError) {
+          return res.status(500).json({ error: uploadError.message });
+        }
+
+        const { data } = supabase.storage
+          .from("photos")
+          .getPublicUrl(fileName);
+
+        images.push({
+          product_id: product.id,
+          url: data.publicUrl
+        });
+      }
+
+      // 3️⃣ salva imagens
+      const { error: imageError } = await supabase
+        .from("product_images")
+        .insert(images);
+
+      if (imageError) {
+        return res.status(500).json({ error: imageError.message });
+      }
+
+      res.status(201).json({ ok: true });
+    } catch (err) {
+      console.error("PRODUCT CREATE ERROR:", err);
+      res.status(500).json({ error: "Erro interno no servidor" });
     }
-
-    if (!title || !description) {
-      return res
-        .status(400)
-        .json({ error: "Título e descrição são obrigatórios" });
-    }
-
-    const fileName = `${Date.now()}-${req.file.originalname}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("photos")
-      .upload(fileName, req.file.buffer);
-
-    if (uploadError) {
-      return res.status(500).json({ error: uploadError.message });
-    }
-
-    const { data } = supabase.storage
-      .from("photos")
-      .getPublicUrl(fileName);
-
-    const { error: insertError } = await supabase.from("photos").insert({
-      url: data.publicUrl,
-      title,
-      description
-    });
-
-    if (insertError) {
-      return res.status(500).json({ error: insertError.message });
-    }
-
-    res.status(201).json({ ok: true });
   }
 );
 
 // ==========================
-// PHOTOS (ADMIN - DELETE)
+// PRODUCTS (ADMIN - DELETE)
 // ==========================
-app.delete("/photos/:id", auth, adminOnly, async (req, res) => {
+app.delete("/products/:id", auth, adminOnly, async (req, res) => {
   const { id } = req.params;
 
-  const { data, error } = await supabase
-    .from("photos")
+  const { data: images } = await supabase
+    .from("product_images")
     .select("url")
-    .eq("id", id)
-    .single();
+    .eq("product_id", id);
 
-  if (error || !data) {
-    return res.status(404).json({ error: "Foto não encontrada" });
+  if (images) {
+    for (const img of images) {
+      const fileName = img.url.split("/").pop();
+      await supabase.storage.from("photos").remove([fileName]);
+    }
   }
 
-  const fileName = data.url.split("/").pop();
-
-  await supabase.storage.from("photos").remove([fileName]);
-  await supabase.from("photos").delete().eq("id", id);
+  await supabase.from("products").delete().eq("id", id);
 
   res.json({ ok: true });
 });
 
 // ==========================
-// STATS (PUBLIC)
+// STATS
 // ==========================
 app.post("/stats/visit", async (_, res) => {
   await supabase.rpc("increment_visitas");
