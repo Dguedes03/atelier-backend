@@ -13,7 +13,7 @@ const app = express();
 // MULTER (UPLOAD MÚLTIPLO)
 // ==========================
 const upload = multer({
-  limits: { fileSize: 5 * 1024 * 1024 }
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB por imagem
 });
 
 // ==========================
@@ -31,8 +31,12 @@ const supabase = createClient(
 );
 
 // ==========================
-// HEALTH
+// ROOT / HEALTH
 // ==========================
+app.get("/", (_, res) => {
+  res.send("🚀 Atelier Backend rodando");
+});
+
 app.get("/health", (_, res) => {
   res.send("Server is healthy");
 });
@@ -145,7 +149,7 @@ app.post(
           .json({ error: "Título e descrição são obrigatórios" });
       }
 
-      if (!req.files || !req.files.length) {
+      if (!req.files || req.files.length === 0) {
         return res
           .status(400)
           .json({ error: "Envie ao menos uma imagem" });
@@ -162,7 +166,7 @@ app.post(
         return res.status(500).json({ error: productError.message });
       }
 
-      // 2️⃣ upload imagens
+      // 2️⃣ upload das imagens
       const images = [];
 
       for (const file of req.files) {
@@ -188,7 +192,7 @@ app.post(
         });
       }
 
-      // 3️⃣ salva imagens
+      // 3️⃣ salva imagens no banco
       const { error: imageError } = await supabase
         .from("product_images")
         .insert(images);
