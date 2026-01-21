@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import multer from "multer";
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { auth, adminOnly } from "./middlewares/auth.js";
 
@@ -9,30 +10,30 @@ dotenv.config();
 
 const app = express();
 
-// ==========================
-// MULTER (UPLOAD MÚLTIPLO)
-// ==========================
+/* =========================
+   MULTER (UPLOAD MÚLTIPLO)
+   ========================= */
 const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB por imagem
 });
 
-// ==========================
-// MIDDLEWARES
-// ==========================
+/* =========================
+   MIDDLEWARES
+   ========================= */
 app.use(cors());
 app.use(express.json());
 
-// ==========================
-// SUPABASE (SERVICE ROLE)
-// ==========================
+/* =========================
+   SUPABASE (SERVICE ROLE)
+   ========================= */
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ==========================
-// ROOT / HEALTH
-// ==========================
+/* =========================
+   ROOT / HEALTH
+   ========================= */
 app.get("/", (_, res) => {
   res.send("🚀 Atelier Backend rodando");
 });
@@ -41,9 +42,9 @@ app.get("/health", (_, res) => {
   res.send("Server is healthy");
 });
 
-// ==========================
-// AUTH
-// ==========================
+/* =========================
+   AUTH
+   ========================= */
 app.post("/auth/register", async (req, res) => {
   const { email, password, cpf, telefone } = req.body;
 
@@ -107,9 +108,9 @@ app.post("/auth/recover", async (req, res) => {
   res.json({ ok: true });
 });
 
-// ==========================
-// PRODUCTS (PUBLIC)
-// ==========================
+/* =========================
+   PRODUCTS (PUBLIC)
+   ========================= */
 app.get("/products", async (_, res) => {
   const { data, error } = await supabase
     .from("products")
@@ -131,9 +132,9 @@ app.get("/products", async (_, res) => {
   res.json(data);
 });
 
-// ==========================
-// PRODUCTS (ADMIN - CREATE)
-// ==========================
+/* =========================
+   PRODUCTS (ADMIN - CREATE)
+   ========================= */
 app.post(
   "/products",
   auth,
@@ -144,18 +145,18 @@ app.post(
       const { title, description } = req.body;
 
       if (!title || !description) {
-        return res
-          .status(400)
-          .json({ error: "Título e descrição são obrigatórios" });
+        return res.status(400).json({
+          error: "Título e descrição são obrigatórios"
+        });
       }
 
       if (!req.files || req.files.length === 0) {
-        return res
-          .status(400)
-          .json({ error: "Envie ao menos uma imagem" });
+        return res.status(400).json({
+          error: "Envie ao menos uma imagem"
+        });
       }
 
-      // 1️⃣ cria produto
+      /* 1️⃣ Criar produto */
       const { data: product, error: productError } = await supabase
         .from("products")
         .insert({ title, description })
@@ -163,23 +164,29 @@ app.post(
         .single();
 
       if (productError) {
+        console.error(productError);
         return res.status(500).json({ error: productError.message });
       }
 
-      // 2️⃣ upload das imagens
+      /* 2️⃣ Upload das imagens */
       const images = [];
 
       for (const file of req.files) {
-        const fileName = `${Date.now()}-${file.originalname}`;
+        const fileName =
+          crypto.randomUUID() + "-" + file.originalname;
 
         const { error: uploadError } = await supabase.storage
           .from("photos")
           .upload(fileName, file.buffer, {
-            contentType: file.mimetype
+            contentType: file.mimetype,
+            upsert: false
           });
 
         if (uploadError) {
-          return res.status(500).json({ error: uploadError.message });
+          console.error(uploadError);
+          return res.status(500).json({
+            error: "Erro ao enviar imagem"
+          });
         }
 
         const { data } = supabase.storage
@@ -192,26 +199,31 @@ app.post(
         });
       }
 
-      // 3️⃣ salva imagens no banco
+      /* 3️⃣ Salvar imagens */
       const { error: imageError } = await supabase
         .from("product_images")
         .insert(images);
 
       if (imageError) {
-        return res.status(500).json({ error: imageError.message });
+        console.error(imageError);
+        return res.status(500).json({
+          error: "Erro ao salvar imagens"
+        });
       }
 
       res.status(201).json({ ok: true });
     } catch (err) {
-      console.error("PRODUCT CREATE ERROR:", err);
-      res.status(500).json({ error: "Erro interno no servidor" });
+      console.error("FATAL ERROR:", err);
+      res.status(500).json({
+        error: "Erro interno no servidor"
+      });
     }
   }
 );
 
-// ==========================
-// PRODUCTS (ADMIN - DELETE)
-// ==========================
+/* =========================
+   PRODUCTS (ADMIN - DELETE)
+   ========================= */
 app.delete("/products/:id", auth, adminOnly, async (req, res) => {
   const { id } = req.params;
 
@@ -232,9 +244,9 @@ app.delete("/products/:id", auth, adminOnly, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ==========================
-// STATS
-// ==========================
+/* =========================
+   STATS
+   ========================= */
 app.post("/stats/visit", async (_, res) => {
   await supabase.rpc("increment_visitas");
   res.json({ ok: true });
@@ -250,9 +262,9 @@ app.post("/stats/click-orcamento", async (_, res) => {
   res.json({ ok: true });
 });
 
-// ==========================
-// ADMIN
-// ==========================
+/* =========================
+   ADMIN
+   ========================= */
 app.get("/admin/stats", auth, adminOnly, async (_, res) => {
   const { data } = await supabase
     .from("stats")
@@ -271,9 +283,9 @@ app.get("/admin/clients", auth, adminOnly, async (_, res) => {
   res.json(data.filter(p => p.role !== "admin"));
 });
 
-// ==========================
-// ME
-// ==========================
+/* =========================
+   ME
+   ========================= */
 app.get("/me", auth, async (req, res) => {
   const { data } = await supabase
     .from("profiles")
@@ -299,9 +311,9 @@ app.get("/me", auth, async (req, res) => {
   });
 });
 
-// ==========================
-// START SERVER
-// ==========================
+/* =========================
+   START SERVER
+   ========================= */
 app.listen(process.env.PORT || 3000, () => {
   console.log("🚀 Server running");
 });
