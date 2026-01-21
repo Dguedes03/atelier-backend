@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import multer from "multer";
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { auth, adminOnly } from "./middlewares/auth.js";
 
@@ -10,7 +11,7 @@ dotenv.config();
 const app = express();
 
 // ==========================
-// MULTER (MEMORY STORAGE) ✅
+// MULTER (MEMORY STORAGE)
 // ==========================
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -24,7 +25,7 @@ app.use(cors());
 app.use(express.json());
 
 // ==========================
-// SUPABASE (SERVICE ROLE)
+// SUPABASE
 // ==========================
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -85,6 +86,13 @@ app.get("/products", async (_, res) => {
     return res.status(500).json({ error: error.message });
   }
 
+  // 🔽 garante ordem correta das imagens
+  data.forEach(p => {
+    p.product_images.sort(
+      (a, b) => a.order_index - b.order_index
+    );
+  });
+
   res.json(data);
 });
 
@@ -106,13 +114,13 @@ app.post(
         });
       }
 
-      if (!req.files || req.files.length === 0) {
+      if (!req.files?.length) {
         return res.status(400).json({
           error: "Envie ao menos uma imagem"
         });
       }
 
-      // 1️⃣ Cria produto
+      // 1️⃣ cria produto
       const { data: product, error: productError } = await supabase
         .from("products")
         .insert({ title, description })
@@ -124,18 +132,20 @@ app.post(
         return res.status(500).json({ error: productError.message });
       }
 
-      // 2️⃣ Upload das imagens
+      // 2️⃣ upload imagens
       const images = [];
 
       for (let i = 0; i < req.files.length; i++) {
         const file = req.files[i];
 
-        const fileName = `${product.id}-${Date.now()}-${i}`;
+        const ext = file.originalname.split(".").pop();
+        const fileName = `${product.id}/${crypto.randomUUID()}.${ext}`;
 
         const { error: uploadError } = await supabase.storage
           .from("photos")
           .upload(fileName, file.buffer, {
-            contentType: file.mimetype
+            contentType: file.mimetype,
+            upsert: false
           });
 
         if (uploadError) {
@@ -154,7 +164,7 @@ app.post(
         });
       }
 
-      // 3️⃣ Salva imagens no banco
+      // 3️⃣ salva imagens
       const { error: imageError } = await supabase
         .from("product_images")
         .insert(images);
@@ -183,9 +193,9 @@ app.delete("/products/:id", auth, adminOnly, async (req, res) => {
     .select("url")
     .eq("product_id", id);
 
-  if (images) {
+  if (images?.length) {
     for (const img of images) {
-      const fileName = img.url.split("/").pop();
+      const fileName = img.url.split("/").slice(-2).join("/");
       await supabase.storage.from("photos").remove([fileName]);
     }
   }
