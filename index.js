@@ -2,7 +2,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import multer from "multer";
-import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import { auth, adminOnly } from "./middlewares/auth.js";
 
@@ -10,30 +9,31 @@ dotenv.config();
 
 const app = express();
 
-/* =========================
-   MULTER (UPLOAD MÚLTIPLO)
-   ========================= */
+// ==========================
+// MULTER (MEMORY STORAGE) ✅
+// ==========================
 const upload = multer({
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB por imagem
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }
 });
 
-/* =========================
-   MIDDLEWARES
-   ========================= */
+// ==========================
+// MIDDLEWARES
+// ==========================
 app.use(cors());
 app.use(express.json());
 
-/* =========================
-   SUPABASE (SERVICE ROLE)
-   ========================= */
+// ==========================
+// SUPABASE (SERVICE ROLE)
+// ==========================
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-/* =========================
-   ROOT / HEALTH
-   ========================= */
+// ==========================
+// ROOT / HEALTH
+// ==========================
 app.get("/", (_, res) => {
   res.send("🚀 Atelier Backend rodando");
 });
@@ -42,40 +42,9 @@ app.get("/health", (_, res) => {
   res.send("Server is healthy");
 });
 
-/* =========================
-   AUTH
-   ========================= */
-app.post("/auth/register", async (req, res) => {
-  const { email, password, cpf, telefone } = req.body;
-
-  if (!email || !password || !cpf || !telefone) {
-    return res.status(400).json({ error: "Dados obrigatórios faltando" });
-  }
-
-  const { data, error } = await supabase.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true
-  });
-
-  if (error) {
-    return res.status(400).json({ error: error.message });
-  }
-
-  const { error: profileError } = await supabase.from("profiles").insert({
-    id: data.user.id,
-    role: "cliente",
-    cpf,
-    telefone
-  });
-
-  if (profileError) {
-    return res.status(400).json({ error: profileError.message });
-  }
-
-  res.status(201).json({ ok: true });
-});
-
+// ==========================
+// AUTH
+// ==========================
 app.post("/auth/login", async (req, res) => {
   const { email, password } = req.body;
 
@@ -94,23 +63,9 @@ app.post("/auth/login", async (req, res) => {
   });
 });
 
-app.post("/auth/recover", async (req, res) => {
-  const { email } = req.body;
-
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: "https://dguedes03.github.io/Persona/reset.html"
-  });
-
-  if (error) {
-    return res.status(400).json({ error: error.message });
-  }
-
-  res.json({ ok: true });
-});
-
-/* =========================
-   PRODUCTS (PUBLIC)
-   ========================= */
+// ==========================
+// PRODUCTS (PUBLIC)
+// ==========================
 app.get("/products", async (_, res) => {
   const { data, error } = await supabase
     .from("products")
@@ -120,7 +75,8 @@ app.get("/products", async (_, res) => {
       description,
       product_images (
         id,
-        url
+        url,
+        order_index
       )
     `)
     .order("created_at", { ascending: false });
@@ -132,9 +88,9 @@ app.get("/products", async (_, res) => {
   res.json(data);
 });
 
-/* =========================
-   PRODUCTS (ADMIN - CREATE)
-   ========================= */
+// ==========================
+// PRODUCTS (ADMIN - CREATE)
+// ==========================
 app.post(
   "/products",
   auth,
@@ -156,7 +112,7 @@ app.post(
         });
       }
 
-      /* 1️⃣ Criar produto */
+      // 1️⃣ Cria produto
       const { data: product, error: productError } = await supabase
         .from("products")
         .insert({ title, description })
@@ -168,25 +124,23 @@ app.post(
         return res.status(500).json({ error: productError.message });
       }
 
-      /* 2️⃣ Upload das imagens */
+      // 2️⃣ Upload das imagens
       const images = [];
 
-      for (const file of req.files) {
-        const fileName =
-          crypto.randomUUID() + "-" + file.originalname;
+      for (let i = 0; i < req.files.length; i++) {
+        const file = req.files[i];
+
+        const fileName = `${product.id}-${Date.now()}-${i}`;
 
         const { error: uploadError } = await supabase.storage
           .from("photos")
           .upload(fileName, file.buffer, {
-            contentType: file.mimetype,
-            upsert: false
+            contentType: file.mimetype
           });
 
         if (uploadError) {
           console.error(uploadError);
-          return res.status(500).json({
-            error: "Erro ao enviar imagem"
-          });
+          return res.status(500).json({ error: uploadError.message });
         }
 
         const { data } = supabase.storage
@@ -195,35 +149,32 @@ app.post(
 
         images.push({
           product_id: product.id,
-          url: data.publicUrl
+          url: data.publicUrl,
+          order_index: i
         });
       }
 
-      /* 3️⃣ Salvar imagens */
+      // 3️⃣ Salva imagens no banco
       const { error: imageError } = await supabase
         .from("product_images")
         .insert(images);
 
       if (imageError) {
         console.error(imageError);
-        return res.status(500).json({
-          error: "Erro ao salvar imagens"
-        });
+        return res.status(500).json({ error: imageError.message });
       }
 
       res.status(201).json({ ok: true });
     } catch (err) {
-      console.error("FATAL ERROR:", err);
-      res.status(500).json({
-        error: "Erro interno no servidor"
-      });
+      console.error("PRODUCT CREATE ERROR:", err);
+      res.status(500).json({ error: "Erro interno no servidor" });
     }
   }
 );
 
-/* =========================
-   PRODUCTS (ADMIN - DELETE)
-   ========================= */
+// ==========================
+// PRODUCTS (ADMIN - DELETE)
+// ==========================
 app.delete("/products/:id", auth, adminOnly, async (req, res) => {
   const { id } = req.params;
 
@@ -244,48 +195,9 @@ app.delete("/products/:id", auth, adminOnly, async (req, res) => {
   res.json({ ok: true });
 });
 
-/* =========================
-   STATS
-   ========================= */
-app.post("/stats/visit", async (_, res) => {
-  await supabase.rpc("increment_visitas");
-  res.json({ ok: true });
-});
-
-app.post("/stats/click-image", async (_, res) => {
-  await supabase.rpc("increment_clique_imagem");
-  res.json({ ok: true });
-});
-
-app.post("/stats/click-orcamento", async (_, res) => {
-  await supabase.rpc("increment_clique_orcamento");
-  res.json({ ok: true });
-});
-
-/* =========================
-   ADMIN
-   ========================= */
-app.get("/admin/stats", auth, adminOnly, async (_, res) => {
-  const { data } = await supabase
-    .from("stats")
-    .select("*")
-    .eq("id", 1)
-    .single();
-
-  res.json(data);
-});
-
-app.get("/admin/clients", auth, adminOnly, async (_, res) => {
-  const { data } = await supabase
-    .from("profiles")
-    .select("cpf, telefone, role");
-
-  res.json(data.filter(p => p.role !== "admin"));
-});
-
-/* =========================
-   ME
-   ========================= */
+// ==========================
+// ME
+// ==========================
 app.get("/me", auth, async (req, res) => {
   const { data } = await supabase
     .from("profiles")
@@ -293,27 +205,15 @@ app.get("/me", auth, async (req, res) => {
     .eq("id", req.user.id)
     .maybeSingle();
 
-  if (!data) {
-    await supabase.from("profiles").insert({
-      id: req.user.id,
-      role: "cliente"
-    });
-
-    return res.json({
-      id: req.user.id,
-      role: "cliente"
-    });
-  }
-
   res.json({
     id: req.user.id,
-    role: data.role
+    role: data?.role || "cliente"
   });
 });
 
-/* =========================
-   START SERVER
-   ========================= */
+// ==========================
+// START SERVER
+// ==========================
 app.listen(process.env.PORT || 3000, () => {
   console.log("🚀 Server running");
 });
